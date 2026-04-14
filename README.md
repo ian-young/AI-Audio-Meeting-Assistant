@@ -11,7 +11,7 @@ I got tired of seeing companies sell $100+ hardware that simply contains a few m
 * **Built-in System Telemetry:** Live tracking of System RAM and Battery.
 * **Verkada Optimized:** Includes a pre-configured LLM grounding prompt to automatically fix phonetic misspellings of company's specific industry terms (e.g., correcting "Ricotta" to "Verkada") when creating notes.
 
-> [!WARNING] LLM CATCH
+> [!WARNING]
 > The output is only as good as the LLM that you are running on. Small, non-multi-modal LLM = poor notes.
 
 ## Prerequisites
