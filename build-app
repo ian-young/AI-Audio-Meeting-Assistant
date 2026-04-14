@@ -1,0 +1,180 @@
+#!/bin/bash
+
+# --- Configuration ---
+APP_NAME="AI Meeting Assistant"
+PYTHON_SCRIPT="app.py"
+ENV_FILE=".env"
+ICON_SIZES=(16 32 128 256 512)
+
+# Color codes for terminal output b/c who remembers these?
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' 
+
+clear
+echo -e "${BLUE}=========================================${NC}"
+echo -e "${BLUE}   ${APP_NAME} Build Script   ${NC}"
+echo -e "${BLUE}=========================================${NC}"
+echo ""
+
+# --- Check Dependencies ---
+echo -e "${YELLOW}[1/4] Checking Python environment...${NC}"
+if [[ "$VIRTUAL_ENV" == "" ]]; then
+    echo -e "${RED}Error: You are not inside a Python virtual environment (.venv).${NC}"
+    echo "Please activate your environment first (e.g., 'source .venv/bin/activate')."
+    exit 1
+fi
+
+if ! command -v pyinstaller &> /dev/null; then
+    echo -e "${YELLOW}PyInstaller not found. Installing now...${NC}"
+    pip install pyinstaller
+else
+    echo -e "${GREEN}✓ PyInstaller is ready.${NC}"
+fi
+echo ""
+
+# --- LM Studio Check ---
+echo -e "${YELLOW}[2/4] Checking for LM Studio...${NC}"
+if [ -d "/Applications/LM Studio.app" ]; then
+    echo -e "${GREEN}✓ LM Studio found in /Applications.${NC}"
+else
+    echo -e "${RED}Warning: LM Studio was not found in /Applications.${NC}"
+    echo -e "${RED}========================================================================${NC}"
+    echo -e "${RED}IMPORTANT:${NC} You must install LM Studio (lmstudio.ai) and ensure"
+    echo -e "${RED}the Local Inference Server is running on port 1234 for this app to work.${NC}"
+    echo -e "${RED}========================================================================${NC}"
+    echo ""
+    read -p "Press Enter to acknowledge and continue the build..."
+fi
+echo ""
+
+# --- Handle Application Icon ---
+echo -e "${YELLOW}[3/4] Configuring Application Icon...${NC}"
+FINAL_ICNS_PATH=""
+
+if [ -f "$ENV_FILE" ]; then
+    export $(grep -v '^#' "$ENV_FILE" | xargs)
+    TEMP_PATH="${APP_ICON_PATH/#\~/$HOME}"
+    
+    if [ -f "$TEMP_PATH" ] && [[ "$TEMP_PATH" == *.icns ]]; then
+        echo -e "${GREEN}✓ Loaded valid .icns path from ${ENV_FILE}: ${APP_ICON_PATH}${NC}"
+        FINAL_ICNS_PATH="$TEMP_PATH"
+    elif [[ "$APP_ICON_PATH" == "NONE" ]]; then
+        echo -e "${GREEN}✓ User has opted out of an icon (from .env).${NC}"
+        FINAL_ICNS_PATH="NONE"
+    else
+        echo -e "${YELLOW}Warning: Icon path in .env is missing or invalid.${NC}"
+    fi
+else
+    echo -e "${YELLOW}.env file not found.${NC}"
+fi
+
+if [ -z "$FINAL_ICNS_PATH" ]; then
+    echo ""
+    echo "This application needs a Mac .icns file for its icon."
+    echo "You can:"
+    echo "  1) Provide an existing .icns file path"
+    echo "  2) Provide a .png file and this script will convert it"
+    echo "  3) Provide a .iconset directory and this script will convert it"
+    echo "  4) Skip adding an icon (uses default Python logo)"
+    echo ""
+    
+    while true; do
+        read -p "Enter path to image/icon file (or type 'skip'): " USER_INPUT
+        INPUT_PATH="${USER_INPUT/#\~/$HOME}"
+        
+        if [[ "$USER_INPUT" == "skip" ]]; then
+            echo "build: Skipping icon."
+            FINAL_ICNS_PATH="NONE"
+            echo "APP_ICON_PATH=NONE" > "$ENV_FILE"
+            break
+        elif [ -f "$INPUT_PATH" ] && [[ "$INPUT_PATH" == *.icns ]]; then
+            echo -e "${GREEN}✓ Valid .icns provided.${NC}"
+            FINAL_ICNS_PATH="$INPUT_PATH"
+            echo "APP_ICON_PATH=$USER_INPUT" > "$ENV_FILE"
+            echo -e "${GREEN}Path saved to ${ENV_FILE}.${NC}"
+            break
+        elif [ -d "$INPUT_PATH" ] && [[ "$INPUT_PATH" == *.iconset ]]; then
+            echo -e "${YELLOW}Processing .iconset directory...${NC}"
+            OUTPUT_ICNS="${INPUT_PATH%.iconset}.icns"
+            iconutil -c icns "$INPUT_PATH"
+            if [ -f "$OUTPUT_ICNS" ]; then
+                echo -e "${GREEN}✓ Created: $OUTPUT_ICNS${NC}"
+                FINAL_ICNS_PATH="$OUTPUT_ICNS"
+                ENV_SAVE_PATH="${OUTPUT_ICNS/#$HOME/\~}"
+                echo "APP_ICON_PATH=$ENV_SAVE_PATH" > "$ENV_FILE"
+                break
+            fi
+        elif [ -f "$INPUT_PATH" ] && [[ "$INPUT_PATH" == *.png ]]; then
+            echo -e "${YELLOW}Converting .png to .icns... (This requires sips)$NC"
+            ICONSET_DIR="${INPUT_PATH%.png}.iconset"
+            mkdir -p "$ICONSET_DIR"
+            
+            for size in "${ICON_SIZES[@]}"; do
+                sips -z $size $size "$INPUT_PATH" --out "$ICONSET_DIR/icon_${size}x${size}.png" > /dev/null 2>&1
+                doubled=$((size * 2))
+                sips -z $doubled $doubled "$INPUT_PATH" --out "$ICONSET_DIR/icon_${size}x${size}@2x.png" > /dev/null 2>&1
+            done
+            
+            OUTPUT_ICNS="${INPUT_PATH%.png}.icns"
+            iconutil -c icns "$ICONSET_DIR"
+            rm -rf "$ICONSET_DIR"
+            
+            if [ -f "$OUTPUT_ICNS" ]; then
+                echo -e "${GREEN}✓ Created: $OUTPUT_ICNS${NC}"
+                FINAL_ICNS_PATH="$OUTPUT_ICNS"
+                ENV_SAVE_PATH="${OUTPUT_ICNS/#$HOME/\~}"
+                echo "APP_ICON_PATH=$ENV_SAVE_PATH" > "$ENV_FILE"
+                break
+            fi
+        else
+            echo -e "${RED}Invalid input. Please provide a valid path or type 'skip'.${NC}"
+        fi
+    done
+fi
+echo ""
+
+# --- Run PyInstaller Build ---
+echo -e "${YELLOW}[4/4] Starting PyInstaller Build...${NC}"
+echo -e "${BLUE}This may take a while${NC}"
+echo "-----------------------------------------"
+
+# Using a Bash Array to prevent EOF/quoting errors
+PYINSTALLER_ARGS=(
+    "--windowed"
+    "--noconfirm"
+    "--name" "$APP_NAME"
+    "--collect-all" "mlx"
+    "--collect-all" "mlx_whisper"
+    "--collect-all" "librosa"
+)
+
+# Append icon if user didn't skip
+if [[ "$FINAL_ICNS_PATH" != "NONE" ]] && [[ -f "$FINAL_ICNS_PATH" ]]; then
+    PYINSTALLER_ARGS+=("--icon" "$FINAL_ICNS_PATH")
+fi
+
+PYINSTALLER_ARGS+=("$PYTHON_SCRIPT")
+
+# Execute
+pyinstaller "${PYINSTALLER_ARGS[@]}"
+
+# --- Cleanup & Final Message ---
+echo "-----------------------------------------"
+echo ""
+
+if [ -d "dist/$APP_NAME.app" ]; then
+    echo -e "${GREEN}=========================================${NC}"
+    echo -e "${GREEN}   BUILD SUCCESSFUL!   ${NC}"
+    echo -e "${GREEN}=========================================${NC}"
+    echo ""
+    echo "Your application is ready in:"
+    echo -e "${BLUE}$(pwd)/dist/$APP_NAME.app${NC}"
+    echo ""
+    echo "Remember: First-time users on other Macs may need to"
+    echo "Right-Click -> Open the app to bypass Gatekeeper."
+else
+    echo -e "${RED}Build failed. Check the PyInstaller output above for errors.${NC}"
+fi
